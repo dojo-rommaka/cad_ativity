@@ -7,10 +7,11 @@ Aplicação CRUD em português para cadastrar, editar, concluir e excluir ativid
 - Formulário de atividade: lista diária, atividade, setor, subsetor, local, data, horário, passo a passo, comentário e realizado.
 - Ao criar, **Salvar** grava e limpa os campos. Na edição, os dados são atualizados e o formulário volta ao modo de novo registo.
 - CRUD completo com confirmação antes de excluir.
-- Abas para lista diária (primeira/aberta por padrão), todas as atividades, setor, subsetor, data e pontos.
+- Abas para lista diária (primeira/aberta por padrão), todas as atividades, setor, subsetor, data, pontos e relatório por setor/mês.
 - Links HTTP/HTTPS colados em passo a passo ou comentário são apresentados como links clicáveis.
-- **A pontuação só acontece quando o campo “Realizado” está marcado e a atividade está na lista diária.** Cada atividade concluída vale 1 ponto, contado pela data agendada.
+- **A pontuação só acontece quando o campo “Realizado” está marcado e a atividade está na lista diária.** Setor e subsetor não são obrigatórios para pontuar. Cada atividade concluída vale 1 ponto, contado pela data agendada.
 - Pontos consultáveis por dia, mês e ano. A mudança do ano começa um período novo em zero sem apagar o histórico: anos anteriores permanecem consultáveis.
+- Relatório mensal com filtro por setor, contagens de atividades e realizadas, pontos, agrupamento por setor/subsetor e lista dos registos correspondentes.
 - SQLite local, com caminho configurável para pasta do Google Drive.
 
 Setores e subsetores são valores nas atividades e as abas agrupam os registos automaticamente. Para mudar o setor/subsetor de uma atividade, use **Editar**.

@@ -48,13 +48,14 @@ def as_datetime(value: str) -> datetime:
         return datetime.now().replace(second=0, microsecond=0)
 
 
-def points_for_day(day: date) -> int:
-    start = datetime.combine(day, time.min).isoformat(timespec="minutes")
-    end = datetime.combine(day, time.max).isoformat(timespec="minutes")
-    return int(conn.execute(
-        "SELECT COUNT(*) FROM activities WHERE completed=1 AND is_daily=1 AND scheduled_at>=? AND scheduled_at<=?",
-        (start, end),
-    ).fetchone()[0])
+def is_point_eligible(row) -> bool:
+    """Points require the explicit completed check and inclusion in the daily list."""
+    return bool(row["completed"] and row["is_daily"])
+
+
+def points_for_day(day: date, activities=None) -> int:
+    activities = load_activities() if activities is None else activities
+    return sum(1 for r in activities if is_point_eligible(r) and as_datetime(r["scheduled_at"]).date() == day)
 
 
 def distinct_values(field: str) -> list[str]:
@@ -140,10 +141,10 @@ heading, score = st.columns([5, 1.3], vertical_alignment="center")
 with heading:
     st.title("📋 Rommaka Praxis")
     st.caption("Gestão de atividades, listas e pontuação — adaptado para telemóvel.")
-with score:
-    st.metric("Pontos de hoje", points_for_day(date.today()))
-
 rows = load_activities()
+with score:
+    st.metric("Pontos de hoje", points_for_day(date.today(), rows))
+
 editing_id = st.session_state.get("editing_id")
 editing = next((r for r in rows if int(r["id"]) == editing_id), None)
 if editing_id and editing is None:
@@ -174,7 +175,7 @@ with st.container(border=True):
             steps = st.text_area("Passo a passo", value=editing["steps"] if editing else "", key=f"steps_{form_token}", height=120, placeholder="Cole aqui texto ou links.")
         with c_col:
             comment = st.text_area("Comentário", value=editing["comment"] if editing else "", key=f"comment_{form_token}", height=120, placeholder="Observações e links.")
-        completed = st.checkbox("✅ Realizado (+1 ponto diário)", value=bool(editing["completed"]) if editing else False, key=f"completed_{form_token}", help="A pontuação só é contabilizada quando este campo está marcado e a atividade está na lista diária.")
+        completed = st.checkbox("✅ Realizado (+1 ponto diário)", value=bool(editing["completed"]) if editing else False, key=f"completed_{form_token}", help="A pontuação só conta quando este campo está marcado e a atividade está na lista diária.")
         save_col, cancel_col = st.columns(2)
         with save_col:
             save = st.form_submit_button("💾 Salvar" if editing else "💾 Salvar e limpar campos", type="primary", use_container_width=True)
@@ -207,8 +208,8 @@ with st.container(border=True):
             conn.commit()
             st.rerun()
 
-st.markdown("### Listas")
-tabs = st.tabs(["📅 Lista diária", "🗂️ Atividades", "🏢 Setores", "🧩 Subsetores", "🗓️ Por data", "⭐ Pontos"])
+st.markdown("### Listas e relatórios")
+tabs = st.tabs(["📅 Lista diária", "🗂️ Atividades", "🏢 Setores", "🧩 Subsetores", "🗓️ Por data", "⭐ Pontos", "📊 Relatórios"])
 with tabs[0]:
     today = date.today()
     st.subheader(f"Atividades de hoje — {today:%d/%m/%Y}")
@@ -239,11 +240,11 @@ with tabs[4]:
     show_activities([r for r in rows if as_datetime(r["scheduled_at"]).date() == selected_date])
 with tabs[5]:
     st.subheader("Pontuação")
-    st.caption("Cada atividade realizada que está na lista diária vale 1 ponto. A pontuação só conta quando o campo ‘Realizado’ está marcado. A mudança do ano zera o novo período sem apagar o histórico anterior.")
+    st.caption("Cada atividade realizada que está na lista diária vale 1 ponto. A pontuação só conta quando ‘Realizado’ está marcado. Não é obrigatório preencher setor ou subsetor para pontuar.")
     score_tabs = st.tabs(["Dia", "Mês", "Ano"])
     with score_tabs[0]:
         chosen_day = st.date_input("Dia", value=date.today(), key="points_day")
-        st.metric(f"Pontos em {chosen_day:%d/%m/%Y}", points_for_day(chosen_day))
+        st.metric(f"Pontos em {chosen_day:%d/%m/%Y}", points_for_day(chosen_day, rows))
     years = sorted({as_datetime(r["scheduled_at"]).year for r in rows} | {date.today().year}, reverse=True)
     with score_tabs[1]:
         mcol, ycol = st.columns(2)
@@ -251,17 +252,47 @@ with tabs[5]:
             chosen_month = st.selectbox("Mês", range(1, 13), index=date.today().month - 1, format_func=lambda m: date(2000, m, 1).strftime("%B"), key="points_month")
         with ycol:
             month_year = st.selectbox("Ano", years, key="points_month_year")
-        count = sum(1 for r in rows if r["completed"] and r["is_daily"] and (d := as_datetime(r["scheduled_at"])).year == month_year and d.month == chosen_month)
+        count = sum(1 for r in rows if is_point_eligible(r) and (d := as_datetime(r["scheduled_at"])).year == month_year and d.month == chosen_month)
         st.metric(f"Pontos no mês — {chosen_month:02d}/{month_year}", count)
     with score_tabs[2]:
         chosen_year = st.selectbox("Ano", years, key="points_year")
-        count = sum(1 for r in rows if r["completed"] and r["is_daily"] and as_datetime(r["scheduled_at"]).year == chosen_year)
+        count = sum(1 for r in rows if is_point_eligible(r) and as_datetime(r["scheduled_at"]).year == chosen_year)
         st.metric(f"Pontos em {chosen_year}", count)
         monthly = []
         for month in range(1, 13):
-            total = sum(1 for r in rows if r["completed"] and r["is_daily"] and (d := as_datetime(r["scheduled_at"])).year == chosen_year and d.month == month)
+            total = sum(1 for r in rows if is_point_eligible(r) and (d := as_datetime(r["scheduled_at"])).year == chosen_year and d.month == month)
             monthly.append({"Mês": date(2000, month, 1).strftime("%B").capitalize(), "Pontos": total})
         st.dataframe(monthly, use_container_width=True, hide_index=True)
+with tabs[6]:
+    st.subheader("Relatório por setor e mês")
+    st.caption("Resumo das atividades e pontos do mês selecionado, agrupado por setor e subsetor. Atividades sem setor também aparecem.")
+    report_c1, report_c2 = st.columns(2)
+    with report_c1:
+        report_month = st.selectbox("Mês do relatório", range(1, 13), index=date.today().month - 1, format_func=lambda m: date(2000, m, 1).strftime("%B").capitalize(), key="report_month")
+    with report_c2:
+        report_year = st.selectbox("Ano do relatório", years, key="report_year")
+    report_sector_options = ["Todos os setores"] + distinct_values("sector")
+    report_sector = st.selectbox("Filtrar setor", report_sector_options, key="report_sector")
+    month_rows = [r for r in rows if (d := as_datetime(r["scheduled_at"])).year == report_year and d.month == report_month and (report_sector == "Todos os setores" or r["sector"] == report_sector)]
+    eligible_month_rows = [r for r in month_rows if is_point_eligible(r)]
+    metric1, metric2, metric3 = st.columns(3)
+    metric1.metric("Atividades no mês", len(month_rows))
+    metric2.metric("Realizadas", sum(bool(r["completed"]) for r in month_rows))
+    metric3.metric("Pontos", len(eligible_month_rows))
+    summary: dict[tuple[str, str], dict[str, int]] = {}
+    for r in month_rows:
+        key = (r["sector"].strip() or "Sem setor", r["subsector"].strip() or "Sem subsetor")
+        summary.setdefault(key, {"Atividades": 0, "Realizadas": 0, "Pontos": 0})
+        summary[key]["Atividades"] += 1
+        summary[key]["Realizadas"] += int(bool(r["completed"]))
+        summary[key]["Pontos"] += int(is_point_eligible(r))
+    if summary:
+        report_data = [{"Setor": sector_name, "Subsetor": sub_name, **values} for (sector_name, sub_name), values in sorted(summary.items())]
+        st.dataframe(report_data, use_container_width=True, hide_index=True)
+        st.markdown("**Atividades incluídas no relatório**")
+        show_activities(month_rows)
+    else:
+        st.info("Não há atividades para o setor e mês selecionados.")
 
 with st.sidebar:
     st.header("Rommaka Praxis")
